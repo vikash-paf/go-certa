@@ -129,6 +129,7 @@ func setupTestACMEServer(t *testing.T) (*httptest.Server, *acme.Server, *ca.Auth
 	if err != nil {
 		t.Fatal(err)
 	}
+	auth.Policy.AllowInternalDomains = true
 
 	store := storage.NewMemoryStorage()
 
@@ -435,3 +436,124 @@ func TestACME_EndToEndIssuance(t *testing.T) {
 		t.Fatalf("expected intermediate certificate in chain PEM")
 	}
 }
+
+func TestACME_ECDSA_CertbotFlow(t *testing.T) {
+	ts, _, _ := setupTestACMEServer(t)
+	defer ts.Close()
+
+	// Certbot uses ECDSA P-256 for accounts and certificates by default
+	acctKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acctJWK, err := acme.KeyToJWK(&acctKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Nonce
+	nonceResp, err := http.Head(ts.URL + "/acme/new-nonce")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := nonceResp.Header.Get("Replay-Nonce")
+
+	// 2. Account
+	acctPayload := []byte(`{"contact":["mailto:admin@test.local"],"termsOfServiceAgreed":true}`)
+	acctJWS, _ := acme.SignJWS(acctKey, acme.JWSHeader{JWK: acctJWK, Nonce: nonce, URL: ts.URL + "/acme/new-account"}, acctPayload)
+	acctResp, err := http.Post(ts.URL+"/acme/new-account", "application/jose+json", bytes.NewReader(acctJWS))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer acctResp.Body.Close()
+	accountURL := acctResp.Header.Get("Location")
+	nonce = acctResp.Header.Get("Replay-Nonce")
+
+	// 3. New Order for test.local
+	orderPayload := []byte(`{"identifiers":[{"type":"dns","value":"test.local"}]}`)
+	orderJWS, _ := acme.SignJWS(acctKey, acme.JWSHeader{Kid: accountURL, Nonce: nonce, URL: ts.URL + "/acme/new-order"}, orderPayload)
+	orderResp, err := http.Post(ts.URL+"/acme/new-order", "application/jose+json", bytes.NewReader(orderJWS))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orderResp.Body.Close()
+	nonce = orderResp.Header.Get("Replay-Nonce")
+	var order acme.Order
+	_ = json.NewDecoder(orderResp.Body).Decode(&order)
+
+	// 4. Trigger challenge
+	authzResp, _ := http.Get(order.Authorizations[0])
+	var authz acme.Authorization
+	_ = json.NewDecoder(authzResp.Body).Decode(&authz)
+	authzResp.Body.Close()
+
+	chalURL := authz.Challenges[0].URL
+	chalJWS, _ := acme.SignJWS(acctKey, acme.JWSHeader{Kid: accountURL, Nonce: nonce, URL: chalURL}, []byte(`{}`))
+	chalResp, err := http.Post(chalURL, "application/jose+json", bytes.NewReader(chalJWS))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce = chalResp.Header.Get("Replay-Nonce")
+	chalResp.Body.Close()
+
+	// 5. Generate ECDSA CSR for test.local
+	certKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrTmpl := &x509.CertificateRequest{
+		Subject:  pkix.Name{CommonName: "test.local"},
+		DNSNames: []string{"test.local"},
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTmpl, certKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	csrB64 := base64.RawURLEncoding.EncodeToString(csrDER)
+	finPayload := []byte(`{"csr":"` + csrB64 + `"}`)
+	finJWS, _ := acme.SignJWS(acctKey, acme.JWSHeader{Kid: accountURL, Nonce: nonce, URL: order.FinalizeURL}, finPayload)
+
+	finResp, err := http.Post(order.FinalizeURL, "application/jose+json", bytes.NewReader(finJWS))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finResp.Body.Close()
+	if finResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(finResp.Body)
+		t.Fatalf("expected 200 OK for finalize with ECDSA CSR, got %d: %s", finResp.StatusCode, string(body))
+	}
+
+	var finOrder acme.Order
+	_ = json.NewDecoder(finResp.Body).Decode(&finOrder)
+	if finOrder.Status != "valid" || finOrder.CertificateURL == "" {
+		t.Fatalf("expected valid order with certificate URL")
+	}
+
+	// 6. Download Certificate
+	certResp, err := http.Get(finOrder.CertificateURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer certResp.Body.Close()
+
+	certPEM, _ := io.ReadAll(certResp.Body)
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		t.Fatal("failed decoding cert PEM")
+	}
+	leafCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leafCert.PublicKeyAlgorithm != x509.ECDSA {
+		t.Errorf("expected ECDSA public key algorithm, got %v", leafCert.PublicKeyAlgorithm)
+	}
+	if leafCert.KeyUsage&x509.KeyUsageKeyEncipherment != 0 {
+		t.Errorf("expected ECDSA cert to NOT have KeyEncipherment set")
+	}
+	if leafCert.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		t.Errorf("expected ECDSA cert to have DigitalSignature set")
+	}
+}
+

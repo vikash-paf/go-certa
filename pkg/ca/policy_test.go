@@ -254,8 +254,9 @@ func TestAuthority_PreIssuanceLintingRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// DefaultServerTLSProfile has KeyEncipherment, which is illegal for ECDSA keys
+	// Profile explicitly asserting illegal KeyEncipherment for ECDSA keys
 	profile := ca.DefaultServerTLSProfile()
+	profile.KeyUsage = x509.KeyUsageKeyEncipherment
 	_, err = auth.SignCertificateWithProfile(
 		csrDER,
 		big.NewInt(12345),
@@ -270,5 +271,47 @@ func TestAuthority_PreIssuanceLintingRejection(t *testing.T) {
 	}
 	if !errors.Is(err, ca.ErrLintFailure) {
 		t.Fatalf("expected ErrLintFailure, got %v", err)
+	}
+}
+
+func TestAuthority_ECDSA_IssuanceSuccess(t *testing.T) {
+	auth := setupTestAuthority(t)
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	csrTmpl := &x509.CertificateRequest{
+		Subject:  pkix.Name{CommonName: "ec.domain.com"},
+		DNSNames: []string{"ec.domain.com"},
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTmpl, ecKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// DefaultServerTLSProfile conforms to modern CA/B Forum BR and RFC 5280
+	certDER, err := auth.SignCertificateWithProfile(
+		csrDER,
+		big.NewInt(12346),
+		ca.DefaultServerTLSProfile(),
+		ca.ExtensionConfig{},
+		30*24*time.Hour,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected successful issuance for ECDSA with DefaultServerTLSProfile, got: %v", err)
+	}
+
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("failed parsing issued ECDSA cert: %v", err)
+	}
+	if cert.KeyUsage&x509.KeyUsageKeyEncipherment != 0 {
+		t.Errorf("ECDSA cert must not have KeyEncipherment set")
+	}
+	if cert.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		t.Errorf("ECDSA cert must have DigitalSignature set")
 	}
 }

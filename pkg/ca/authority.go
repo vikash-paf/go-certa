@@ -3,6 +3,8 @@ package ca
 import (
 	"context"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
@@ -198,6 +200,16 @@ func (a *Authority) SignCertificateWithProfile(
 		akid, _ = ComputeSubjectKeyID(a.IntermediateCert.PublicKey)
 	}
 
+	// Align KeyUsage to public key algorithm per RFC 5280 §4.2.1.3 and CA/B Forum BR §7.1.2.7.6:
+	// For ECDSA and Ed25519 keys, KeyEncipherment MUST NOT be asserted.
+	keyUsage := profile.KeyUsage
+	switch csr.PublicKey.(type) {
+	case *ecdsa.PublicKey, ed25519.PublicKey:
+		if keyUsage&x509.KeyUsageDigitalSignature != 0 {
+			keyUsage &^= x509.KeyUsageKeyEncipherment
+		}
+	}
+
 	// 5. Assemble Certificate Template
 	certTmpl := &x509.Certificate{
 		SerialNumber:          serial,
@@ -208,7 +220,7 @@ func (a *Authority) SignCertificateWithProfile(
 		URIs:                  csr.URIs,
 		NotBefore:             time.Now().Add(-5 * time.Minute), // Backdate 5m to counter clock skew
 		NotAfter:              time.Now().Add(validity),
-		KeyUsage:              profile.KeyUsage,
+		KeyUsage:              keyUsage,
 		ExtKeyUsage:           profile.ExtKeyUsage,
 		BasicConstraintsValid: true,
 		IsCA:                  profile.IsCA,
@@ -299,6 +311,16 @@ func (a *Authority) SignCertificateWithCT(
 		akid, _ = ComputeSubjectKeyID(a.IntermediateCert.PublicKey)
 	}
 
+	// Align KeyUsage to public key algorithm per RFC 5280 §4.2.1.3 and CA/B Forum BR §7.1.2.7.6:
+	// For ECDSA and Ed25519 keys, KeyEncipherment MUST NOT be asserted.
+	keyUsage := profile.KeyUsage
+	switch csr.PublicKey.(type) {
+	case *ecdsa.PublicKey, ed25519.PublicKey:
+		if keyUsage&x509.KeyUsageDigitalSignature != 0 {
+			keyUsage &^= x509.KeyUsageKeyEncipherment
+		}
+	}
+
 	certTmpl := &x509.Certificate{
 		SerialNumber:          serial,
 		Subject:               csr.Subject,
@@ -308,7 +330,7 @@ func (a *Authority) SignCertificateWithCT(
 		URIs:                  csr.URIs,
 		NotBefore:             time.Now().Add(-5 * time.Minute),
 		NotAfter:              time.Now().Add(validity),
-		KeyUsage:              profile.KeyUsage,
+		KeyUsage:              keyUsage,
 		ExtKeyUsage:           profile.ExtKeyUsage,
 		BasicConstraintsValid: true,
 		IsCA:                  profile.IsCA,

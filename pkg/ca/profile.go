@@ -68,7 +68,7 @@ func DefaultServerTLSProfile() ProfileConfig {
 		Description:        "Standard TLS Server Profile (RFC 5280 / CA/B Forum BR)",
 		AllowedMaxValidity: 398 * 24 * time.Hour, // Max 398 days per CA/B Forum BR
 		DefaultValidity:    90 * 24 * time.Hour,  // 90-day recommended cadence
-		KeyUsage:           x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		KeyUsage:           x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:        []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		IsCA:               false,
 		RequireSAN:         true,
