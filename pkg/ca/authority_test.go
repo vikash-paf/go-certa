@@ -79,6 +79,13 @@ func TestAuthority(t *testing.T) {
 		t.Errorf("expected serial %v, got %v", serial, cert.SerialNumber)
 	}
 
+	if len(cert.SubjectKeyId) == 0 {
+		t.Errorf("expected non-empty SubjectKeyId on issued certificate")
+	}
+	if len(cert.AuthorityKeyId) == 0 {
+		t.Errorf("expected non-empty AuthorityKeyId on issued certificate")
+	}
+
 	// Verify cert chain: client -> Intermediate -> Root
 	intermediates := x509.NewCertPool()
 	intermediates.AddCert(auth.IntermediateCert)
