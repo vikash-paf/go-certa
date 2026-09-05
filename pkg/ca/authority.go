@@ -1,6 +1,7 @@
 package ca
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -13,6 +14,8 @@ import (
 	"math/big"
 	"net"
 	"time"
+
+	"go-certa/pkg/ctlog"
 )
 
 // Authority manages the CA trust anchor hierarchy (Root + Intermediate) and signs downstream certificates.
@@ -225,5 +228,137 @@ func (a *Authority) SignCertificateWithProfile(
 	}
 
 	// 7. Sign Certificate using the Intermediate Signer (HSM)
+	return x509.CreateCertificate(rand.Reader, certTmpl, a.IntermediateCert, csr.PublicKey, a.Signer)
+}
+
+// SignCertificateWithCT issues an end-entity certificate with embedded SCTs (RFC 6962).
+// It constructs and signs a pre-certificate containing the critical CT Poison extension,
+// submits it to the provided CT log submitters, serializes the collected SCTs,
+// embeds them into the final certificate template (removing the poison extension),
+// and produces the signed final certificate.
+func (a *Authority) SignCertificateWithCT(
+	ctx context.Context,
+	csrDER []byte,
+	serial *big.Int,
+	profile ProfileConfig,
+	extConfig ExtensionConfig,
+	validity time.Duration,
+	dnsNames []string,
+	ctSubmitters []*ctlog.CTSubmitter,
+) ([]byte, error) {
+	if serial == nil || serial.Sign() <= 0 {
+		return nil, errors.New("serial number must be a positive integer")
+	}
+
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		return nil, fmt.Errorf("malformed csr: %w", err)
+	}
+
+	if err := csr.CheckSignature(); err != nil {
+		return nil, fmt.Errorf("csr proof-of-possession verification failed: %w", err)
+	}
+
+	policy := a.Policy
+	if policy == nil {
+		policy = NewDefaultPolicyEngine()
+	}
+
+	if validity <= 0 {
+		validity = profile.DefaultValidity
+	}
+	if profile.AllowedMaxValidity > 0 && validity > profile.AllowedMaxValidity {
+		return nil, fmt.Errorf("%w: requested %v exceeds max %v", ErrValidityExceeded, validity, profile.AllowedMaxValidity)
+	}
+
+	sanDNS := csr.DNSNames
+	if len(dnsNames) > 0 {
+		sanDNS = dnsNames
+	}
+
+	if profile.RequireSAN && len(sanDNS) == 0 && len(csr.IPAddresses) == 0 && len(csr.EmailAddresses) == 0 && len(csr.URIs) == 0 {
+		return nil, ErrSANRequired
+	}
+
+	if err := policy.ValidatePublicKey(csr.PublicKey); err != nil {
+		return nil, fmt.Errorf("public key policy validation failed: %w", err)
+	}
+	for _, d := range sanDNS {
+		if err := policy.ValidateDNSName(d); err != nil {
+			return nil, fmt.Errorf("dns name policy validation failed: %w", err)
+		}
+	}
+
+	skid, err := ComputeSubjectKeyID(csr.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed computing subject key identifier: %w", err)
+	}
+
+	akid := a.IntermediateCert.SubjectKeyId
+	if len(akid) == 0 {
+		akid, _ = ComputeSubjectKeyID(a.IntermediateCert.PublicKey)
+	}
+
+	certTmpl := &x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               csr.Subject,
+		DNSNames:              sanDNS,
+		IPAddresses:           csr.IPAddresses,
+		EmailAddresses:        csr.EmailAddresses,
+		URIs:                  csr.URIs,
+		NotBefore:             time.Now().Add(-5 * time.Minute),
+		NotAfter:              time.Now().Add(validity),
+		KeyUsage:              profile.KeyUsage,
+		ExtKeyUsage:           profile.ExtKeyUsage,
+		BasicConstraintsValid: true,
+		IsCA:                  profile.IsCA,
+		MaxPathLen:            profile.MaxPathLen,
+		MaxPathLenZero:        profile.MaxPathLenZero,
+		SubjectKeyId:          skid,
+		AuthorityKeyId:        akid,
+		OCSPServer:            extConfig.OCSPServerURLs,
+		IssuingCertificateURL: extConfig.IssuingCertificateURLs,
+		CRLDistributionPoints: extConfig.CRLDistributionPoints,
+	}
+
+	lintResults := policy.LintCertificate(certTmpl, csr.PublicKey, profile)
+	if HasLintErrors(lintResults) {
+		return nil, &LintErrors{Results: lintResults}
+	}
+
+	// 1. Build and sign Pre-certificate with critical CT Poison extension
+	preCertTmpl, err := ctlog.BuildPreCertificateTemplate(certTmpl)
+	if err != nil {
+		return nil, fmt.Errorf("failed building pre-certificate template: %w", err)
+	}
+
+	preCertDER, err := x509.CreateCertificate(rand.Reader, preCertTmpl, a.IntermediateCert, csr.PublicKey, a.Signer)
+	if err != nil {
+		return nil, fmt.Errorf("failed creating pre-certificate: %w", err)
+	}
+
+	// 2. Submit to CT logs and collect SCTs
+	var scts [][]byte
+	for _, submitter := range ctSubmitters {
+		if submitter == nil {
+			continue
+		}
+		sct, err := submitter.SubmitPreCertificate(ctx, preCertDER, a.IntermediateCert.Raw)
+		if err != nil {
+			return nil, fmt.Errorf("CT log submission to %s failed: %w", submitter.URL, err)
+		}
+		scts = append(scts, sct)
+	}
+
+	// 3. Serialize and embed SCT list into final certificate template
+	if len(scts) > 0 {
+		serializedList, err := ctlog.SerializeSCTList(scts)
+		if err != nil {
+			return nil, fmt.Errorf("failed serializing SCT list: %w", err)
+		}
+		ctlog.EmbedSCTList(certTmpl, serializedList)
+	}
+
+	// 4. Sign final certificate (without CT poison, with SCT list extension)
 	return x509.CreateCertificate(rand.Reader, certTmpl, a.IntermediateCert, csr.PublicKey, a.Signer)
 }
