@@ -137,7 +137,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case http.MethodGet, http.MethodHead:
 		// RFC 5019 §2.1: GET /{url-encoded-base64-ocsp-request}
-		raw := r.URL.Path
+		raw := r.URL.EscapedPath()
+		if raw == "" {
+			raw = r.URL.Path
+		}
 		for _, prefix := range []string{"/ocsp/", "/ocsp"} {
 			if strings.HasPrefix(raw, prefix) {
 				raw = strings.TrimPrefix(raw, prefix)
@@ -153,14 +156,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		unescaped, unerr := url.QueryUnescape(raw)
+		unescaped, unerr := url.PathUnescape(raw)
 		if unerr != nil {
-			unescaped, unerr = url.PathUnescape(raw)
+			unescaped, unerr = url.QueryUnescape(raw)
 			if unerr != nil {
 				http.Error(w, "invalid url encoding", http.StatusBadRequest)
 				return
 			}
 		}
+		unescaped = strings.ReplaceAll(unescaped, " ", "+")
 
 		reqBytes, err = base64.StdEncoding.DecodeString(unescaped)
 		if err != nil {
@@ -170,7 +174,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					reqBytes, err = base64.RawURLEncoding.DecodeString(unescaped)
 					if err != nil {
-						http.Error(w, "invalid base64 ocsp request", http.StatusBadRequest)
+						http.Error(w, "invalid base64 ocsp request: "+err.Error(), http.StatusBadRequest)
 						return
 					}
 				}

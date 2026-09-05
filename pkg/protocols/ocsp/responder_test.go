@@ -231,7 +231,7 @@ func TestOCSP_HTTPGet_RFC5019_And_Caching(t *testing.T) {
 
 	// Construct RFC 5019 URL: GET /ocsp/{base64-request}
 	b64Req := base64.StdEncoding.EncodeToString(reqDER)
-	urlPath := "/ocsp/" + url.PathEscape(b64Req)
+	urlPath := "/ocsp/" + url.QueryEscape(b64Req)
 
 	// 1. GET Request
 	req := httptest.NewRequest(http.MethodGet, urlPath, nil)
