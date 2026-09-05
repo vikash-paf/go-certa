@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"go-certa/pkg/ca"
@@ -87,10 +88,11 @@ func (h *Handler) HandleSimpleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pemBlock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: res.CertDER})
+
 	// Persist to storage if storage is configured
 	if h.store != nil {
 		if cert, err := x509.ParseCertificate(res.CertDER); err == nil {
-			pemBlock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: res.CertDER})
 			_ = h.store.SaveCertificate(r.Context(), &storage.CertificateRecord{
 				Serial:    ca.FormatSerial(cert.SerialNumber),
 				Subject:   cert.Subject.String(),
@@ -104,7 +106,16 @@ func (h *Handler) HandleSimpleEnroll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	format := strings.ToLower(r.URL.Query().Get("format"))
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	if format == "pem" || strings.Contains(accept, "application/x-pem-file") || strings.Contains(accept, "text/plain") {
+		w.Header().Set("Content-Type", "application/x-pem-file; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(pemBlock)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/pkix-cert")
 	w.WriteHeader(http.StatusOK)
-	w.Write(res.CertDER)
+	_, _ = w.Write(res.CertDER)
 }

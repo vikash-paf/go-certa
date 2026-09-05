@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
@@ -215,11 +216,25 @@ func NewServerApp(cfg AppConfig) (*ServerApp, error) {
 	// Prometheus telemetry route
 	mux.Handle("/metrics", metrics.Handler())
 
-	// RFC 5280 AIA caIssuers endpoint serving intermediate CA DER certificate
+	// Intermediate CA PEM block for ASCII downloads/views
+	intermediatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: authority.IntermediateCert.Raw})
+
+	// RFC 5280 AIA caIssuers endpoint serving intermediate CA certificate (DER by default, PEM if requested)
 	mux.HandleFunc("/ca/intermediate.crt", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		format := strings.ToLower(r.URL.Query().Get("format"))
+		accept := strings.ToLower(r.Header.Get("Accept"))
+		if format == "pem" || strings.Contains(accept, "application/x-pem-file") || strings.Contains(accept, "text/plain") {
+			w.Header().Set("Content-Type", "application/x-pem-file; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			if r.Method == http.MethodHead {
+				return
+			}
+			_, _ = w.Write(intermediatePEM)
 			return
 		}
 		w.Header().Set("Content-Type", "application/pkix-cert")
@@ -228,6 +243,21 @@ func NewServerApp(cfg AppConfig) (*ServerApp, error) {
 			return
 		}
 		_, _ = w.Write(authority.IntermediateCert.Raw)
+	})
+
+	// Direct ASCII PEM endpoint for intermediate CA certificate
+	mux.HandleFunc("/ca/intermediate.pem", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-pem-file; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		if r.Method == http.MethodHead {
+			return
+		}
+		_, _ = w.Write(intermediatePEM)
 	})
 
 	// Optional Swagger UI and OpenAPI 3.0 documentation

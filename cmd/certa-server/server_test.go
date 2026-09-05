@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,6 +122,35 @@ func TestFullServer_Integration(t *testing.T) {
 		}
 		if parsedCert.Subject.CommonName != app.Authority.IntermediateCert.Subject.CommonName {
 			t.Errorf("expected intermediate CN %q, got %q", app.Authority.IntermediateCert.Subject.CommonName, parsedCert.Subject.CommonName)
+		}
+	})
+
+	t.Run("AIA /ca/intermediate.crt?format=pem and /ca/intermediate.pem", func(t *testing.T) {
+		for _, path := range []string{"/ca/intermediate.crt?format=pem", "/ca/intermediate.pem"} {
+			resp, err := http.Get(ts.URL + path)
+			if err != nil {
+				t.Fatalf("GET %s failed: %v", path, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("%s: expected HTTP 200, got %d", path, resp.StatusCode)
+			}
+			if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "application/x-pem-file") {
+				t.Errorf("%s: expected application/x-pem-file, got %s", path, ct)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			block, _ := pem.Decode(body)
+			if block == nil || block.Type != "CERTIFICATE" {
+				t.Fatalf("%s: failed decoding PEM certificate block", path)
+			}
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				t.Fatalf("%s: failed parsing decoded PEM certificate: %v", path, err)
+			}
+			if cert.Subject.CommonName != app.Authority.IntermediateCert.Subject.CommonName {
+				t.Errorf("%s: expected CN %q, got %q", path, app.Authority.IntermediateCert.Subject.CommonName, cert.Subject.CommonName)
+			}
 		}
 	})
 

@@ -48,16 +48,53 @@
     "/ca/intermediate.crt": {
       "get": {
         "tags": ["Trust Anchors & AIA"],
-        "summary": "Fetch Intermediate CA Certificate (AIA caIssuers)",
-        "description": "Returns the binary DER-encoded Intermediate CA certificate referenced in the AIA extension of issued leaf certificates.",
+        "summary": "Fetch Intermediate CA Certificate (AIA caIssuers DER/PEM)",
+        "description": "Returns the Intermediate CA certificate referenced in the AIA extension of issued leaf certificates. Returns binary DER by default (application/pkix-cert) or ASCII PEM if requested via ?format=pem or Accept header.",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "Encoding format: 'der' (default, binary ASN.1) or 'pem' (ASCII PEM)",
+            "schema": {
+              "type": "string",
+              "enum": ["der", "pem"],
+              "default": "der"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Intermediate CA Certificate in binary DER format",
+            "description": "Intermediate CA Certificate in binary DER or ASCII PEM format",
             "content": {
               "application/pkix-cert": {
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              },
+              "application/x-pem-file": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ca/intermediate.pem": {
+      "get": {
+        "tags": ["Trust Anchors & AIA"],
+        "summary": "Fetch Intermediate CA Certificate (ASCII PEM)",
+        "description": "Returns the Intermediate CA certificate in standard ASCII PEM format (application/x-pem-file), ideal for direct viewing in browsers, terminal inspection, or copy-pasting.",
+        "responses": {
+          "200": {
+            "description": "Intermediate CA Certificate in ASCII PEM format",
+            "content": {
+              "application/x-pem-file": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -89,7 +126,20 @@
       "post": {
         "tags": ["Enrollment - EST (RFC 7030)"],
         "summary": "Enroll Client Certificate (SimpleEnroll)",
-        "description": "Accepts a Base64-encoded PKCS#10 Certificate Signing Request (CSR) and issues an end-entity certificate.",
+        "description": "Accepts a Base64-encoded PKCS#10 Certificate Signing Request (CSR) and issues an end-entity certificate. Returns binary DER by default or ASCII PEM via ?format=pem.",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "Encoding format: 'der' (default, binary ASN.1) or 'pem' (ASCII PEM)",
+            "schema": {
+              "type": "string",
+              "enum": ["der", "pem"],
+              "default": "der"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "description": "Base64-encoded DER PKCS#10 CSR",
@@ -104,12 +154,17 @@
         },
         "responses": {
           "200": {
-            "description": "Newly issued client certificate in binary DER format",
+            "description": "Newly issued client certificate in binary DER or ASCII PEM format",
             "content": {
               "application/pkix-cert": {
                 "schema": {
                   "type": "string",
                   "format": "binary"
+                }
+              },
+              "application/x-pem-file": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
