@@ -124,6 +124,31 @@ func TestPolicy_DisallowedDNSNames(t *testing.T) {
 	}
 }
 
+func TestPolicy_AllowInternalDomains(t *testing.T) {
+	policy := ca.NewDefaultPolicyEngine()
+	policy.AllowInternalDomains = true
+
+	allowed := []string{
+		"test.local",
+		"localhost",
+		"service.internal",
+		"host.lan",
+		"mytest.test",
+		"example.com",
+	}
+
+	for _, d := range allowed {
+		if err := policy.ValidateDNSName(d); err != nil {
+			t.Errorf("expected %q to be allowed when AllowInternalDomains=true, got: %v", d, err)
+		}
+	}
+
+	// .onion must still be disallowed
+	if err := policy.ValidateDNSName("hidden.onion"); !errors.Is(err, ca.ErrForbiddenDNSName) {
+		t.Errorf("expected ErrForbiddenDNSName for hidden.onion, got: %v", err)
+	}
+}
+
 func TestPolicy_CSRValidation(t *testing.T) {
 	policy := ca.NewDefaultPolicyEngine()
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)

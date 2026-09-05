@@ -82,12 +82,13 @@ func HasLintErrors(results []LintResult) bool {
 
 // PolicyEngine enforces pre-issuance validation rules and linting checks.
 type PolicyEngine struct {
-	MaxValidityDuration time.Duration
-	AllowWildcards      bool
-	MinRSAKeySize       int
-	AllowedECCurves     []elliptic.Curve
-	DisallowedDNSNames  []string
-	RequireDNSOrIP      bool
+	MaxValidityDuration  time.Duration
+	AllowWildcards       bool
+	AllowInternalDomains bool
+	MinRSAKeySize        int
+	AllowedECCurves      []elliptic.Curve
+	DisallowedDNSNames   []string
+	RequireDNSOrIP       bool
 }
 
 // NewDefaultPolicyEngine initializes a PolicyEngine with standard CA/B Forum and RFC 5280 constraints.
@@ -204,6 +205,9 @@ func (p *PolicyEngine) ValidateDNSName(name string) error {
 
 	// Disallowed DNS names or suffixes
 	for _, disallowed := range p.DisallowedDNSNames {
+		if p.AllowInternalDomains && isInternalDomainSuffix(disallowed) {
+			continue
+		}
 		if trimmed == disallowed || strings.HasSuffix(trimmed, disallowed) {
 			return fmt.Errorf("%w: domain %q matches disallowed suffix %q", ErrForbiddenDNSName, name, disallowed)
 		}
@@ -341,4 +345,13 @@ func (p *PolicyEngine) LintCertificate(cert *x509.Certificate, pubKey crypto.Pub
 	}
 
 	return results
+}
+
+func isInternalDomainSuffix(suffix string) bool {
+	switch suffix {
+	case "localhost", ".local", ".internal", ".lan", ".test", ".invalid", ".example":
+		return true
+	default:
+		return false
+	}
 }

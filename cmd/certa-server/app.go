@@ -33,6 +33,7 @@ type AppConfig struct {
 	DataDir                 string // Directory for sqlite DB, CA keys, and audit log. If empty, runs in-memory.
 	AuditWriter             io.Writer
 	SkipChallengeValidation bool
+	AllowInternalDomains    bool // If true, permits internal/local TLDs like .local, .internal, localhost, etc.
 	EnableSwagger           bool // If true, mounts Swagger UI at /swagger/ and OpenAPI spec at /swagger/doc.json
 	CRLInterval             time.Duration
 	CRLValidity             time.Duration
@@ -131,6 +132,10 @@ func NewServerApp(cfg AppConfig) (*ServerApp, error) {
 			return nil, fmt.Errorf("failed initializing CA authority: %w", err)
 		}
 		authority = auth
+	}
+
+	if cfg.AllowInternalDomains || cfg.SkipChallengeValidation {
+		authority.Policy.AllowInternalDomains = true
 	}
 
 	// 2. Initialize cryptographically chained audit logger
