@@ -295,6 +295,12 @@ func TestACME_EndToEndIssuance(t *testing.T) {
 		body, _ := io.ReadAll(chalResp.Body)
 		t.Fatalf("expected 200 OK for challenge, got %d: %s", chalResp.StatusCode, string(body))
 	}
+	if link := chalResp.Header.Get("Link"); link != "<"+authzURL+`>;rel="up"` {
+		t.Errorf("expected challenge Link header %q, got %q", "<"+authzURL+`>;rel="up"`, link)
+	}
+	if loc := chalResp.Header.Get("Location"); loc != chalURL {
+		t.Errorf("expected challenge Location header %q, got %q", chalURL, loc)
+	}
 	nonce = chalResp.Header.Get("Replay-Nonce")
 
 	// 7. Verify Order Status via POST-as-GET (RFC 8555 §6.3)
@@ -359,6 +365,9 @@ func TestACME_EndToEndIssuance(t *testing.T) {
 		body, _ := io.ReadAll(finResp.Body)
 		t.Fatalf("expected 200 OK for finalize, got %d: %s", finResp.StatusCode, string(body))
 	}
+	if loc := finResp.Header.Get("Location"); loc != orderURL {
+		t.Errorf("expected finalize Location %q, got %q", orderURL, loc)
+	}
 
 	var finalizedOrder acme.Order
 	_ = json.NewDecoder(finResp.Body).Decode(&finalizedOrder)
@@ -381,6 +390,9 @@ func TestACME_EndToEndIssuance(t *testing.T) {
 	}
 	if ct := certResp.Header.Get("Content-Type"); ct != "application/pem-certificate-chain" {
 		t.Errorf("expected application/pem-certificate-chain, got %s", ct)
+	}
+	if link := certResp.Header.Get("Link"); link == "" || !bytes.Contains([]byte(link), []byte(`rel="up"`)) {
+		t.Errorf("expected cert download Link header with rel=up, got %q", link)
 	}
 
 	certPEMBytes, err := io.ReadAll(certResp.Body)

@@ -530,6 +530,7 @@ func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request, orderID 
 		}
 	}
 
+	w.Header().Set("Location", fmt.Sprintf("%s/acme/order/%s", s.baseURL, orderID))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(order)
 }
@@ -558,14 +559,13 @@ func (s *Server) handleGetAuthz(w http.ResponseWriter, r *http.Request, authzID 
 }
 
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request, chalID string) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
+	if r.Method == http.MethodPost {
+		if _, ok := s.verifyJWS(w, r); !ok {
+			return
+		}
+	} else if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	_, ok := s.verifyJWS(w, r)
-	if !ok {
 		return
 	}
 
@@ -585,7 +585,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request, chalID 
 	chal := &authz.Challenges[ref.Index]
 
 	// Mark valid if skipped in test mode or already valid
-	if s.skipChallengeValidation || chal.Status == "pending" {
+	if r.Method == http.MethodPost && (s.skipChallengeValidation || chal.Status == "pending") {
 		chal.Status = "valid"
 		chal.Validated = time.Now().UTC().Format(time.RFC3339)
 		authz.Status = "valid"
@@ -608,8 +608,14 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request, chalID 
 		}
 	}
 	chalCopy := *chal
+	authzID := ref.AuthzID
 	s.mu.Unlock()
 
+	// RFC 8555 §7.5.1: The server MUST include a "Link" header field pointing to the
+	// authorization resource (with relation "up").
+	authzURL := fmt.Sprintf("%s/acme/authz/%s", s.baseURL, authzID)
+	w.Header().Set("Link", fmt.Sprintf("<%s>;rel=\"up\"", authzURL))
+	w.Header().Set("Location", chalCopy.URL)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(chalCopy)
 }
@@ -742,6 +748,8 @@ func (s *Server) handleFinalizeOrder(w http.ResponseWriter, r *http.Request, ord
 	orderCopy := *order
 	s.mu.Unlock()
 
+	orderURL := fmt.Sprintf("%s/acme/order/%s", s.baseURL, orderID)
+	w.Header().Set("Location", orderURL)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(orderCopy)
 }
@@ -761,6 +769,8 @@ func (s *Server) handleGetCertificate(w http.ResponseWriter, r *http.Request, ce
 		return
 	}
 
+	// RFC 8555 §7.4.2: Server may provide Link rel="up" pointing to the issuer certificate
+	w.Header().Set("Link", fmt.Sprintf("<%s/ca/intermediate.crt>;rel=\"up\"", s.baseURL))
 	w.Header().Set("Content-Type", "application/pem-certificate-chain")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(chainPEM)
