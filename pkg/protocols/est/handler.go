@@ -53,10 +53,19 @@ func (h *Handler) HandleSimpleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	csrDER, err := base64.StdEncoding.DecodeString(string(body))
-	if err != nil {
-		http.Error(w, "body must be base64-encoded PKCS#10 CSR", http.StatusBadRequest)
-		return
+	var csrDER []byte
+	if block, _ := pem.Decode(body); block != nil {
+		csrDER = block.Bytes
+	} else {
+		cleanBody := strings.ReplaceAll(string(body), "\r", "")
+		cleanBody = strings.ReplaceAll(cleanBody, "\n", "")
+		cleanBody = strings.TrimSpace(cleanBody)
+		var err error
+		csrDER, err = base64.StdEncoding.DecodeString(cleanBody)
+		if err != nil {
+			http.Error(w, "body must be base64 or PEM-encoded PKCS#10 CSR", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Generate RFC 5280 compliant serial
