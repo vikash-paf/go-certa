@@ -13,9 +13,23 @@ import (
 func main() {
 	log.Println("Initializing go-certa Digital Trust Authority...")
 
+	listenAddr := os.Getenv("CERTA_LISTEN_ADDR")
+	if listenAddr == "" {
+		listenAddr = ":8080"
+	}
+	baseURL := os.Getenv("CERTA_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
+	}
+	dataDir := os.Getenv("CERTA_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+
 	app, err := NewServerApp(AppConfig{
-		ListenAddr:              ":8080",
-		BaseURL:                 "http://localhost:8080",
+		ListenAddr:              listenAddr,
+		BaseURL:                 baseURL,
+		DataDir:                 dataDir,
 		AuditWriter:             os.Stdout,
 		SkipChallengeValidation: false,
 		CRLInterval:             1 * time.Hour,

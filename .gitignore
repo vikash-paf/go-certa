@@ -32,3 +32,11 @@ go.work.sum
 # .vscode/
 
 .tmp/**
+data/
+bin/
+*.b64
+*.der
+*.csr
+*.key
+*.crt
+*.crl

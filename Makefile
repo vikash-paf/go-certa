@@ -1,4 +1,4 @@
-.PHONY: help build run test test-race coverage clean enroll-est fetch-intermediate check-ocsp fetch-crl revoke-cert metrics
+.PHONY: help build run test test-race coverage clean enroll-est fetch-intermediate check-ocsp fetch-crl revoke-cert metrics docker-build docker-up docker-down docker-logs
 
 # Default target
 help:
@@ -15,6 +15,10 @@ help:
 	@echo "make fetch-crl         - Download and inspect CRL from /crl/intermediate.crl"
 	@echo "make revoke-cert       - Revoke certificate (specify SERIAL=<hex_or_dec> REASON=<1-5>)"
 	@echo "make metrics           - Query Prometheus metrics from /metrics"
+	@echo "make docker-build      - Build Docker container image"
+	@echo "make docker-up         - Start service in background using Docker Compose"
+	@echo "make docker-down       - Stop Docker Compose service"
+	@echo "make docker-logs       - Tail Docker Compose logs"
 	@echo "make clean             - Clean build outputs and temporary keys/certificates"
 
 # Build & Run
@@ -34,6 +38,19 @@ test-race:
 coverage:
 	@go test -coverprofile=coverage.out ./...
 	@go tool cover -func=coverage.out
+
+# Docker operations
+docker-build:
+	@docker build -t go-certa:latest .
+
+docker-up:
+	@docker compose up -d
+
+docker-down:
+	@docker compose down
+
+docker-logs:
+	@docker compose logs -f
 
 # Operational PKI commands
 fetch-intermediate:

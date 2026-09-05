@@ -1,6 +1,7 @@
 package est
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
@@ -9,19 +10,27 @@ import (
 	"net/http"
 	"time"
 
+	"go-certa/pkg/ca"
 	"go-certa/pkg/signer"
+	"go-certa/pkg/storage"
 )
 
 type Handler struct {
 	pool       *signer.WorkerPool
 	cacertsPEM []byte
+	store      storage.Storage
 }
 
-func NewHandler(pool *signer.WorkerPool, caCertDER []byte) *Handler {
+func NewHandler(pool *signer.WorkerPool, caCertDER []byte, stores ...storage.Storage) *Handler {
 	pemBlock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertDER})
+	var store storage.Storage
+	if len(stores) > 0 {
+		store = stores[0]
+	}
 	return &Handler{
 		pool:       pool,
 		cacertsPEM: pemBlock,
+		store:      store,
 	}
 }
 
@@ -49,10 +58,25 @@ func (h *Handler) HandleSimpleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate RFC 5280 compliant serial
+	var serial *big.Int
+	if h.store != nil {
+		serial, err = ca.GenerateAndReserveSerial(r.Context(), h.store)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed allocating serial: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		serial, err = ca.GenerateSerial()
+		if err != nil {
+			serial = big.NewInt(time.Now().UnixNano())
+		}
+	}
+
 	resChan := make(chan signer.SignResponse, 1)
 	h.pool.Submit(signer.SignRequest{
 		CSRDER:   csrDER,
-		Serial:   big.NewInt(time.Now().UnixNano()),
+		Serial:   serial,
 		Validity: 90 * 24 * time.Hour,
 		ResChan:  resChan,
 	})
@@ -61,6 +85,23 @@ func (h *Handler) HandleSimpleEnroll(w http.ResponseWriter, r *http.Request) {
 	if res.Err != nil {
 		http.Error(w, fmt.Sprintf("enrollment failed: %v", res.Err), http.StatusInternalServerError)
 		return
+	}
+
+	// Persist to storage if storage is configured
+	if h.store != nil {
+		if cert, err := x509.ParseCertificate(res.CertDER); err == nil {
+			pemBlock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: res.CertDER})
+			_ = h.store.SaveCertificate(r.Context(), &storage.CertificateRecord{
+				Serial:    ca.FormatSerial(cert.SerialNumber),
+				Subject:   cert.Subject.String(),
+				Issuer:    cert.Issuer.String(),
+				NotBefore: cert.NotBefore,
+				NotAfter:  cert.NotAfter,
+				RawDER:    res.CertDER,
+				PEM:       pemBlock,
+				Revoked:   false,
+			})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/pkix-cert")

@@ -1,0 +1,27 @@
+services:
+  certa-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: go-certa:latest
+    container_name: go-certa
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - CERTA_DATA_DIR=/data
+      - CERTA_LISTEN_ADDR=:8080
+      - CERTA_BASE_URL=http://localhost:8080
+    volumes:
+      - certa-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/metrics"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  certa-data:
+    name: certa_data
+    driver: local

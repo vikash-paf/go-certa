@@ -78,11 +78,11 @@ A `Makefile` is included for common operational workflows. Run `make help` to in
 make help
 ```
 
-### 1. Start the CA Server
+### 1. Start the CA Server Locally
 ```bash
 make run
 ```
-The server will boot on `http://localhost:8080`.
+The server will boot on `http://localhost:8080` with persistent storage stored in `./data`.
 
 ### 2. Run Tests
 ```bash
@@ -90,6 +90,41 @@ make test        # Run all unit and integration tests
 make test-race   # Run tests with the Go race detector
 make coverage    # Generate code coverage summary
 ```
+
+---
+
+## 🐳 Deploy with Docker & Docker Compose
+
+For deploying to your test cloud server or containerized environments:
+
+### Quick Start
+```bash
+# Build and start in background
+make docker-up
+# or
+docker compose up -d --build
+
+# View real-time logs
+make docker-logs
+
+# Stop services
+make docker-down
+```
+
+### Persistent Data Volume
+Docker Compose automatically provisions a persistent named volume (`certa_data` mounted to `/data` in the container). The directory persists:
+* `/data/certa.db`: SQLite database storing all certificates, serials, and revocations.
+* `/data/ca/`: Root and Intermediate CA keys and certificates (`root.key`, `root.crt`, `intermediate.key`, `intermediate.crt`).
+* `/data/audit.log`: Tamper-evident append-only cryptographic audit trail.
+
+---
+
+## 💾 Data Persistence & Resuming Services
+
+When running either locally or in Docker:
+1. **Initial Boot**: `go-certa` generates the Root and Intermediate CA keypairs, self-signs the Root CA, issues the Intermediate CA certificate, and writes them to `<data_dir>/ca/` with strict file permissions (`0600` for keys). It also initializes `<data_dir>/certa.db`.
+2. **Subsequent Boots / Restarts**: `go-certa` detects the existing CA materials on disk and reloads the exact same Root and Intermediate CA keys and certificates.
+3. **Database Resumption**: SQLite in WAL mode retains all previously issued certificates, serial numbers, and revocation records across restarts. Previously issued client certificates and OCSP statuses remain valid and verifiable!
 
 ---
 

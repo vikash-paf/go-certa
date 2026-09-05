@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 type AppConfig struct {
 	ListenAddr              string
 	BaseURL                 string
+	DataDir                 string // Directory for sqlite DB, CA keys, and audit log. If empty, runs in-memory.
 	AuditWriter             io.Writer
 	SkipChallengeValidation bool
 	CRLInterval             time.Duration
@@ -51,6 +53,7 @@ type ServerApp struct {
 	HTTPServer    *http.Server
 
 	workerCancel context.CancelFunc
+	auditCloser  io.Closer
 }
 
 type cryptoSignerWrapper struct {
@@ -67,8 +70,9 @@ func NewServerApp(cfg AppConfig) (*ServerApp, error) {
 	}
 	cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/")
 
-	if cfg.AuditWriter == nil {
-		cfg.AuditWriter = os.Stdout
+	auditWriter := cfg.AuditWriter
+	if auditWriter == nil {
+		auditWriter = os.Stdout
 	}
 	if cfg.CRLInterval <= 0 {
 		cfg.CRLInterval = 1 * time.Hour
@@ -77,27 +81,60 @@ func NewServerApp(cfg AppConfig) (*ServerApp, error) {
 		cfg.CRLValidity = 24 * time.Hour
 	}
 
-	// 1. Initialize persistent storage
-	store := storage.NewMemoryStorage()
+	var store storage.Storage
+	var authority *ca.Authority
+	var hsmSigner *signer.HSMSigner
+	var auditCloser io.Closer
+
+	if cfg.DataDir != "" && cfg.DataDir != ":memory:" {
+		if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
+			return nil, fmt.Errorf("failed creating data dir: %w", err)
+		}
+
+		// 1. Persistent SQLite database
+		dbPath := filepath.Join(cfg.DataDir, "certa.db")
+		sqliteStore, err := storage.NewSQLiteStorage(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed initializing sqlite storage: %w", err)
+		}
+		store = sqliteStore
+
+		// 2. Persistent CA key and certificate hierarchy
+		auth, signerInst, err := ca.LoadOrInitializeAuthority(cfg.DataDir, 15*time.Millisecond)
+		if err != nil {
+			return nil, fmt.Errorf("failed loading or initializing CA authority: %w", err)
+		}
+		authority = auth
+		hsmSigner = signerInst
+
+		// 3. Persistent audit log file (multi-writer with stdout)
+		auditFile, err := os.OpenFile(filepath.Join(cfg.DataDir, "audit.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err == nil {
+			auditWriter = io.MultiWriter(auditWriter, auditFile)
+			auditCloser = auditFile
+		}
+	} else {
+		// Ephemeral in-memory storage and CA
+		store = storage.NewMemoryStorage()
+
+		intKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return nil, fmt.Errorf("failed creating intermediate key: %w", err)
+		}
+		hsmSigner = signer.NewHSMSigner(intKey, 15*time.Millisecond)
+
+		auth, err := ca.NewAuthority(hsmSigner)
+		if err != nil {
+			return nil, fmt.Errorf("failed initializing CA authority: %w", err)
+		}
+		authority = auth
+	}
 
 	// 2. Initialize cryptographically chained audit logger
-	auditLog := audit.NewChainAuditLogger(cfg.AuditWriter)
+	auditLog := audit.NewChainAuditLogger(auditWriter)
 
 	// 3. Initialize Prometheus telemetry registry
 	metrics := telemetry.NewRegistry()
-
-	// 4. Generate Intermediate CA Key & HSM Signer
-	intKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, fmt.Errorf("failed creating intermediate key: %w", err)
-	}
-	hsmSigner := signer.NewHSMSigner(intKey, 15*time.Millisecond)
-
-	// 5. Initialize CA Authority with CABF/RFC 5280 policy engine
-	authority, err := ca.NewAuthority(hsmSigner)
-	if err != nil {
-		return nil, fmt.Errorf("failed initializing CA authority: %w", err)
-	}
 
 	// Record initial key access audit event
 	_, _ = auditLog.LogEvent(
@@ -151,7 +188,7 @@ func NewServerApp(cfg AppConfig) (*ServerApp, error) {
 	}
 
 	// 11. Initialize RFC 7030 EST Handler
-	estHandler := est.NewHandler(workerPool, authority.IntermediateCert.Raw)
+	estHandler := est.NewHandler(workerPool, authority.IntermediateCert.Raw, store)
 
 	// 12. Register all standard HTTP routes
 	mux := http.NewServeMux()
@@ -213,6 +250,7 @@ func NewServerApp(cfg AppConfig) (*ServerApp, error) {
 		ESTHandler:    estHandler,
 		Mux:           mux,
 		HTTPServer:    server,
+		auditCloser:   auditCloser,
 	}
 
 	return app, nil
@@ -271,6 +309,20 @@ func (app *ServerApp) Stop(ctx context.Context) error {
 	// Stop worker pool
 	if app.workerCancel != nil {
 		app.workerCancel()
+	}
+
+	// Close storage if closer
+	if closer, ok := app.Storage.(io.Closer); ok {
+		if err := closer.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	// Close audit log file if closer
+	if app.auditCloser != nil {
+		if err := app.auditCloser.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
 
 	return firstErr
