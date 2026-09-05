@@ -155,6 +155,7 @@ func (s *Server) NonceManager() *NonceManager {
 
 func (s *Server) writeProblem(w http.ResponseWriter, p ProblemDetails) {
 	w.Header().Set("Content-Type", "application/problem+json")
+	s.addNonceHeader(w)
 	w.WriteHeader(p.Status)
 	_ = json.NewEncoder(w).Encode(p)
 }
@@ -225,6 +226,11 @@ func randomID(prefix string) string {
 
 // ServeHTTP routes incoming ACME HTTP requests.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// RFC 8555 §6.5: Every response to a POST request MUST include a Replay-Nonce header.
+	if r.Method == http.MethodPost {
+		s.addNonceHeader(w)
+	}
+
 	path := r.URL.Path
 
 	switch {
@@ -251,6 +257,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/acme/cert/"):
 		certID := strings.TrimPrefix(path, "/acme/cert/")
 		s.handleGetCertificate(w, r, certID)
+	case strings.HasPrefix(path, "/acme/acct/"):
+		acctID := strings.TrimPrefix(path, "/acme/acct/")
+		s.handleAccount(w, r, acctID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -379,6 +388,29 @@ func (s *Server) handleNewAccount(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(account)
 }
 
+func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request, acctID string) {
+	if r.Method == http.MethodPost {
+		if _, ok := s.verifyJWS(w, r); !ok {
+			return
+		}
+	}
+	s.mu.RLock()
+	acct, exists := s.accounts[acctID]
+	s.mu.RUnlock()
+
+	if !exists {
+		s.writeProblem(w, ProblemDetails{
+			Type:   ProblemAccountDoesNotExist,
+			Detail: "account not found",
+			Status: http.StatusNotFound,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(acct)
+}
+
 type newOrderPayload struct {
 	Identifiers []Identifier `json:"identifiers"`
 }
@@ -458,6 +490,11 @@ func (s *Server) handleNewOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request, orderID string) {
+	if r.Method == http.MethodPost {
+		if _, ok := s.verifyJWS(w, r); !ok {
+			return
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -491,6 +528,11 @@ func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request, orderID 
 }
 
 func (s *Server) handleGetAuthz(w http.ResponseWriter, r *http.Request, authzID string) {
+	if r.Method == http.MethodPost {
+		if _, ok := s.verifyJWS(w, r); !ok {
+			return
+		}
+	}
 	s.mu.RLock()
 	authz, exists := s.authorizations[authzID]
 	s.mu.RUnlock()
@@ -698,6 +740,11 @@ func (s *Server) handleFinalizeOrder(w http.ResponseWriter, r *http.Request, ord
 }
 
 func (s *Server) handleGetCertificate(w http.ResponseWriter, r *http.Request, certID string) {
+	if r.Method == http.MethodPost {
+		if _, ok := s.verifyJWS(w, r); !ok {
+			return
+		}
+	}
 	s.mu.RLock()
 	chainPEM, exists := s.certificates[certID]
 	s.mu.RUnlock()

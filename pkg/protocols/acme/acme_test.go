@@ -297,12 +297,26 @@ func TestACME_EndToEndIssuance(t *testing.T) {
 	}
 	nonce = chalResp.Header.Get("Replay-Nonce")
 
-	// 7. Verify Order Status is now "ready"
-	checkOrderResp, err := http.Get(orderURL)
+	// 7. Verify Order Status via POST-as-GET (RFC 8555 §6.3)
+	orderPostAsGetJWS, err := acme.SignJWS(clientKey, acme.JWSHeader{
+		Kid:   accountURL,
+		Nonce: nonce,
+		URL:   orderURL,
+	}, nil)
 	if err != nil {
-		t.Fatalf("GET order failed: %v", err)
+		t.Fatalf("SignJWS for POST-as-GET order failed: %v", err)
+	}
+
+	checkOrderResp, err := http.Post(orderURL, "application/jose+json", bytes.NewReader(orderPostAsGetJWS))
+	if err != nil {
+		t.Fatalf("POST-as-GET order failed: %v", err)
 	}
 	defer checkOrderResp.Body.Close()
+	if checkOrderResp.Header.Get("Replay-Nonce") == "" {
+		t.Fatalf("expected Replay-Nonce header on POST-as-GET order response")
+	}
+	nonce = checkOrderResp.Header.Get("Replay-Nonce")
+
 	var updatedOrder acme.Order
 	_ = json.NewDecoder(checkOrderResp.Body).Decode(&updatedOrder)
 	if updatedOrder.Status != "ready" {

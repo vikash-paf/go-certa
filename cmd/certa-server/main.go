@@ -27,9 +27,13 @@ func main() {
 	}
 
 	enableSwagger := os.Getenv("CERTA_ENABLE_SWAGGER") == "true" || os.Getenv("CERTA_DEBUG") == "true"
+	skipChallengeValidation := os.Getenv("CERTA_SKIP_CHALLENGE_VALIDATION") == "true"
 	for _, arg := range os.Args[1:] {
 		if arg == "--swagger" || arg == "--debug" {
 			enableSwagger = true
+		}
+		if arg == "--skip-challenge-validation" {
+			skipChallengeValidation = true
 		}
 	}
 
@@ -38,7 +42,7 @@ func main() {
 		BaseURL:                 baseURL,
 		DataDir:                 dataDir,
 		AuditWriter:             os.Stdout,
-		SkipChallengeValidation: false,
+		SkipChallengeValidation: skipChallengeValidation,
 		EnableSwagger:           enableSwagger,
 		CRLInterval:             1 * time.Hour,
 		CRLValidity:             24 * time.Hour,
