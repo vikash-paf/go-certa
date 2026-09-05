@@ -259,10 +259,27 @@ Shutdown complete.
 
 ---
 
-## In-Depth Technical Documentation
+### 8. Interactive API Console (Swagger UI)
+
+To explore and test all PKI endpoints interactively in your browser:
+
+```bash
+# Start with Swagger UI enabled
+make run-debug
+# or: CERTA_ENABLE_SWAGGER=true make run
+```
+
+Then visit:
+* **Swagger UI**: [`http://localhost:8080/swagger/`](http://localhost:8080/swagger/)
+* **OpenAPI 3.0 Spec**: [`http://localhost:8080/swagger/doc.json`](http://localhost:8080/swagger/doc.json)
+
+---
+
+## 📚 In-Depth Technical Documentation
 
 Explore the detailed architecture guides in [`docs/`](docs/):
 
+* [Interactive API Console & OpenAPI Specification](docs/swagger_api.md)
 * [Storage & Serial Number Entropy (RFC 5280)](docs/storage_and_serials.md)
 * [Certificate Profiles & X.509 Extensions](docs/certificate_profiles_and_extensions.md)
 * [CRL Generation & Publishing Architecture](docs/crl_generation.md)

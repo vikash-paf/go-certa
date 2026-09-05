@@ -12,6 +12,7 @@ services:
       - CERTA_DATA_DIR=/data
       - CERTA_LISTEN_ADDR=:8080
       - CERTA_BASE_URL=http://localhost:8080
+      - CERTA_ENABLE_SWAGGER=true # Enable Swagger UI at http://<server-ip>:8080/swagger/
     volumes:
       - certa-data:/data
     healthcheck:

@@ -21,6 +21,7 @@ import (
 	"go-certa/pkg/protocols/ocsp"
 	"go-certa/pkg/signer"
 	"go-certa/pkg/storage"
+	"go-certa/pkg/swagger"
 	"go-certa/pkg/telemetry"
 )
 
@@ -31,6 +32,7 @@ type AppConfig struct {
 	DataDir                 string // Directory for sqlite DB, CA keys, and audit log. If empty, runs in-memory.
 	AuditWriter             io.Writer
 	SkipChallengeValidation bool
+	EnableSwagger           bool // If true, mounts Swagger UI at /swagger/ and OpenAPI spec at /swagger/doc.json
 	CRLInterval             time.Duration
 	CRLValidity             time.Duration
 }
@@ -227,6 +229,13 @@ func NewServerApp(cfg AppConfig) (*ServerApp, error) {
 		}
 		_, _ = w.Write(authority.IntermediateCert.Raw)
 	})
+
+	// Optional Swagger UI and OpenAPI 3.0 documentation
+	if cfg.EnableSwagger {
+		swaggerHandler := swagger.NewHandler()
+		mux.Handle("/swagger/", swaggerHandler)
+		mux.Handle("/swagger", swaggerHandler)
+	}
 
 	server := &http.Server{
 		Addr:         cfg.ListenAddr,

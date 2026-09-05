@@ -1,10 +1,11 @@
-.PHONY: help build run test test-race coverage clean enroll-est fetch-intermediate check-ocsp fetch-crl revoke-cert metrics docker-build docker-up docker-down docker-logs
+.PHONY: help build run run-debug test test-race coverage clean enroll-est fetch-intermediate check-ocsp fetch-crl revoke-cert metrics docker-build docker-up docker-down docker-logs
 
 # Default target
 help:
 	@echo "go-certa - Certificate Authority & PKI Operations"
 	@echo "=================================================="
 	@echo "make run               - Start the CA server (http://localhost:8080)"
+	@echo "make run-debug         - Start the CA server with Swagger UI enabled (/swagger/)"
 	@echo "make build             - Compile server binary into bin/"
 	@echo "make test              - Run all unit and integration tests"
 	@echo "make test-race         - Run tests with race condition detector"
@@ -27,6 +28,9 @@ build:
 
 run:
 	@go run ./cmd/certa-server/
+
+run-debug:
+	@CERTA_ENABLE_SWAGGER=true go run ./cmd/certa-server/
 
 # Testing
 test:

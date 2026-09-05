@@ -1,0 +1,404 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "go-certa PKI & Certificate Authority API",
+    "description": "Enterprise-grade Certificate Authority providing automated enrollment (ACME RFC 8555, EST RFC 7030), real-time status verification (OCSP RFC 6960/5019, CRL RFC 5280), Certificate Transparency (RFC 6962), and Prometheus observability.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Go-Certa Digital Trust Network"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local Development / Test Server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Enrollment - EST (RFC 7030)",
+      "description": "Enrollment over Secure Transport for routers, switches, and IoT devices"
+    },
+    {
+      "name": "Enrollment - ACME (RFC 8555)",
+      "description": "Automatic Certificate Management Environment for web servers"
+    },
+    {
+      "name": "Revocation & Status",
+      "description": "Real-time OCSP responder and scheduled Certificate Revocation Lists"
+    },
+    {
+      "name": "Management & Revocation API",
+      "description": "Administrative operations including certificate revocation"
+    },
+    {
+      "name": "Trust Anchors & AIA",
+      "description": "Authority Information Access endpoints for chain building"
+    },
+    {
+      "name": "Observability",
+      "description": "Prometheus telemetry and health metrics"
+    }
+  ],
+  "paths": {
+    "/ca/intermediate.crt": {
+      "get": {
+        "tags": ["Trust Anchors & AIA"],
+        "summary": "Fetch Intermediate CA Certificate (AIA caIssuers)",
+        "description": "Returns the binary DER-encoded Intermediate CA certificate referenced in the AIA extension of issued leaf certificates.",
+        "responses": {
+          "200": {
+            "description": "Intermediate CA Certificate in binary DER format",
+            "content": {
+              "application/pkix-cert": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/est/cacerts": {
+      "get": {
+        "tags": ["Enrollment - EST (RFC 7030)"],
+        "summary": "Fetch CA Trust Anchor Chain",
+        "description": "Returns the CA certificate chain formatted for the EST protocol.",
+        "responses": {
+          "200": {
+            "description": "CA Certificate Chain",
+            "content": {
+              "application/pkcs7-mime": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/est/simpleenroll": {
+      "post": {
+        "tags": ["Enrollment - EST (RFC 7030)"],
+        "summary": "Enroll Client Certificate (SimpleEnroll)",
+        "description": "Accepts a Base64-encoded PKCS#10 Certificate Signing Request (CSR) and issues an end-entity certificate.",
+        "requestBody": {
+          "required": true,
+          "description": "Base64-encoded DER PKCS#10 CSR",
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string",
+                "example": "MIICvDCCAaQCAQAwdzELMAkGA1UEBhMCVVM..."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Newly issued client certificate in binary DER format",
+            "content": {
+              "application/pkix-cert": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed CSR or invalid base64 encoding"
+          },
+          "500": {
+            "description": "Signing or policy validation error"
+          }
+        }
+      }
+    },
+    "/.well-known/acme/directory": {
+      "get": {
+        "tags": ["Enrollment - ACME (RFC 8555)"],
+        "summary": "ACME Service Directory",
+        "description": "Returns the entry point URLs for all ACME resources per RFC 8555 §7.1.1.",
+        "responses": {
+          "200": {
+            "description": "ACME directory index",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ACMEDirectory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/acme/new-nonce": {
+      "get": {
+        "tags": ["Enrollment - ACME (RFC 8555)"],
+        "summary": "Get Anti-Replay Nonce",
+        "description": "Returns an anti-replay nonce in the Replay-Nonce HTTP response header.",
+        "responses": {
+          "200": {
+            "description": "Fresh nonce issued",
+            "headers": {
+              "Replay-Nonce": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Single-use anti-replay token"
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "example": "no-store"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/revoke": {
+      "post": {
+        "tags": ["Management & Revocation API"],
+        "summary": "Revoke a Certificate",
+        "description": "Revokes an active certificate by its serial number and records an RFC 5280 revocation reason code.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevocationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Certificate revoked successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevocationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or missing serial number"
+          },
+          "404": {
+            "description": "Certificate serial number not found"
+          },
+          "409": {
+            "description": "Certificate already revoked"
+          }
+        }
+      }
+    },
+    "/ocsp": {
+      "post": {
+        "tags": ["Revocation & Status"],
+        "summary": "Online Certificate Status Protocol (RFC 6960 POST)",
+        "description": "Accepts a binary DER-encoded OCSP request and returns a signed OCSP response indicating whether the certificate is Good, Revoked, or Unknown.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/ocsp-request": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed OCSP Response",
+            "content": {
+              "application/ocsp-response": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed OCSP Request"
+          }
+        }
+      }
+    },
+    "/ocsp/{request}": {
+      "get": {
+        "tags": ["Revocation & Status"],
+        "summary": "RFC 5019 HTTP GET OCSP with CDN Caching",
+        "description": "Queries OCSP status using a URL-encoded Base64 OCSP request. Supports Cache-Control and ETag revalidation (304 Not Modified).",
+        "parameters": [
+          {
+            "name": "request",
+            "in": "path",
+            "required": true,
+            "description": "URL-encoded Base64 DER OCSP request blob",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signed OCSP Response with HTTP caching headers",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "example": "public, max-age=3600, no-transform, must-revalidate"
+                }
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "example": "\"a1b2c3d4...\""
+                }
+              }
+            },
+            "content": {
+              "application/ocsp-response": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Not Modified (ETag matched If-None-Match header)"
+          }
+        }
+      }
+    },
+    "/crl/intermediate.crl": {
+      "get": {
+        "tags": ["Revocation & Status"],
+        "summary": "Fetch Certificate Revocation List (RFC 5280)",
+        "description": "Returns the latest signed ASN.1 DER-encoded Certificate Revocation List (CRL) for the Issuing Intermediate CA.",
+        "responses": {
+          "200": {
+            "description": "Signed binary DER CRL",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "example": "public, max-age=3600, must-revalidate"
+                }
+              }
+            },
+            "content": {
+              "application/pkix-crl": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["Observability"],
+        "summary": "Prometheus Metrics",
+        "description": "Exposes real-time CA operational metrics in Prometheus 0.0.4 text exposition format.",
+        "responses": {
+          "200": {
+            "description": "Prometheus text metrics",
+            "content": {
+              "text/plain; version=0.0.4": {
+                "schema": {
+                  "type": "string",
+                  "example": "certa_certificates_issued_total{profile=\"server-tls\"} 12\ncerta_ocsp_requests_total{status=\"good\"} 45"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RevocationRequest": {
+        "type": "object",
+        "required": ["serial"],
+        "properties": {
+          "serial": {
+            "type": "string",
+            "description": "Certificate serial number (Hex or Decimal format)",
+            "example": "4a7f29c0b1e388d2"
+          },
+          "reason": {
+            "type": "integer",
+            "description": "RFC 5280 §5.3.1 Revocation Reason Code: 0=unspecified, 1=keyCompromise, 2=cACompromise, 3=affiliationChanged, 4=superseded, 5=cessationOfOperation",
+            "default": 1,
+            "enum": [0, 1, 2, 3, 4, 5]
+          }
+        }
+      },
+      "RevocationResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "revoked"
+          },
+          "serial": {
+            "type": "string",
+            "example": "4a7f29c0b1e388d2"
+          },
+          "reason": {
+            "type": "integer",
+            "example": 1
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-09-05T17:00:00Z"
+          }
+        }
+      },
+      "ACMEDirectory": {
+        "type": "object",
+        "properties": {
+          "newNonce": {
+            "type": "string",
+            "example": "http://localhost:8080/acme/new-nonce"
+          },
+          "newAccount": {
+            "type": "string",
+            "example": "http://localhost:8080/acme/new-account"
+          },
+          "newOrder": {
+            "type": "string",
+            "example": "http://localhost:8080/acme/new-order"
+          },
+          "revokeCert": {
+            "type": "string",
+            "example": "http://localhost:8080/acme/revoke-cert"
+          }
+        }
+      }
+    }
+  }
+}

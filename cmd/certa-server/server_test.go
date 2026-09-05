@@ -248,4 +248,57 @@ func TestFullServer_Integration(t *testing.T) {
 			t.Errorf("expected recorded audit events")
 		}
 	})
+
+	// 10. Verify Swagger is disabled by default
+	t.Run("Swagger_Disabled_By_Default", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/swagger/")
+		if err != nil {
+			t.Fatalf("GET /swagger/ failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404 when swagger is disabled, got %d", resp.StatusCode)
+		}
+	})
 }
+
+func TestServerApp_SwaggerEnabled(t *testing.T) {
+	app, err := main.NewServerApp(main.AppConfig{
+		ListenAddr:    ":0",
+		BaseURL:       "http://localhost:8080",
+		EnableSwagger: true,
+	})
+	if err != nil {
+		t.Fatalf("failed creating ServerApp: %v", err)
+	}
+
+	ts := httptest.NewServer(app.Mux)
+	defer ts.Close()
+
+	// 1. Check /swagger/ UI page
+	resp, err := http.Get(ts.URL + "/swagger/")
+	if err != nil {
+		t.Fatalf("GET /swagger/ failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for /swagger/, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "swagger-ui") {
+		t.Errorf("expected swagger-ui in response body")
+	}
+
+	// 2. Check /swagger/doc.json OpenAPI spec
+	respDoc, err := http.Get(ts.URL + "/swagger/doc.json")
+	if err != nil {
+		t.Fatalf("GET /swagger/doc.json failed: %v", err)
+	}
+	defer respDoc.Body.Close()
+
+	if respDoc.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for /swagger/doc.json, got %d", respDoc.StatusCode)
+	}
+}
+

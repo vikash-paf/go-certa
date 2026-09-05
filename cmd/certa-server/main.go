@@ -26,12 +26,20 @@ func main() {
 		dataDir = "./data"
 	}
 
+	enableSwagger := os.Getenv("CERTA_ENABLE_SWAGGER") == "true" || os.Getenv("CERTA_DEBUG") == "true"
+	for _, arg := range os.Args[1:] {
+		if arg == "--swagger" || arg == "--debug" {
+			enableSwagger = true
+		}
+	}
+
 	app, err := NewServerApp(AppConfig{
 		ListenAddr:              listenAddr,
 		BaseURL:                 baseURL,
 		DataDir:                 dataDir,
 		AuditWriter:             os.Stdout,
 		SkipChallengeValidation: false,
+		EnableSwagger:           enableSwagger,
 		CRLInterval:             1 * time.Hour,
 		CRLValidity:             24 * time.Hour,
 	})
@@ -51,6 +59,9 @@ func main() {
 
 	go func() {
 		log.Printf("Server online on http://localhost%s", app.Config.ListenAddr)
+		if app.Config.EnableSwagger {
+			log.Printf("Swagger UI available at http://localhost%s/swagger/", app.Config.ListenAddr)
+		}
 		if err := app.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen error: %v", err)
 		}
