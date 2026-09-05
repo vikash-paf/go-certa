@@ -154,6 +154,54 @@ func TestFullServer_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("Root CA /ca/root.pem and Full Chain /ca/chain.pem", func(t *testing.T) {
+		// Test Root CA
+		resp, err := http.Get(ts.URL + "/ca/root.pem")
+		if err != nil {
+			t.Fatalf("GET /ca/root.pem failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200 on /ca/root.pem, got %d", resp.StatusCode)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		block, _ := pem.Decode(body)
+		if block == nil {
+			t.Fatalf("failed decoding /ca/root.pem")
+		}
+		rootCert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatalf("failed parsing root cert: %v", err)
+		}
+		if rootCert.Subject.CommonName != app.Authority.RootCert.Subject.CommonName {
+			t.Errorf("expected root CN %q, got %q", app.Authority.RootCert.Subject.CommonName, rootCert.Subject.CommonName)
+		}
+
+		// Test Combined Chain
+		respChain, err := http.Get(ts.URL + "/ca/chain.pem")
+		if err != nil {
+			t.Fatalf("GET /ca/chain.pem failed: %v", err)
+		}
+		defer respChain.Body.Close()
+		if respChain.StatusCode != http.StatusOK {
+			t.Fatalf("expected HTTP 200 on /ca/chain.pem, got %d", respChain.StatusCode)
+		}
+		chainBytes, _ := io.ReadAll(respChain.Body)
+		var certCount int
+		rest := chainBytes
+		for {
+			var b *pem.Block
+			b, rest = pem.Decode(rest)
+			if b == nil {
+				break
+			}
+			certCount++
+		}
+		if certCount != 2 {
+			t.Errorf("expected 2 certificates in /ca/chain.pem, got %d", certCount)
+		}
+	})
+
 	// 5. Test RFC 8555 ACME Directory: GET /.well-known/acme/directory
 	t.Run("ACME Directory", func(t *testing.T) {
 		resp, err := http.Get(ts.URL + "/.well-known/acme/directory")
