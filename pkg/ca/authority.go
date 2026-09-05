@@ -20,6 +20,7 @@ type Authority struct {
 	RootCert         *x509.Certificate
 	IntermediateCert *x509.Certificate
 	Signer           crypto.Signer
+	Policy           *PolicyEngine
 }
 
 // ComputeSubjectKeyID computes the RFC 5280 §4.2.1.2 Method (1) 160-bit SHA-1 hash of the public key bit string.
@@ -108,6 +109,7 @@ func NewAuthority(signer crypto.Signer) (*Authority, error) {
 		RootCert:         rootCert,
 		IntermediateCert: intCert,
 		Signer:           signer,
+		Policy:           NewDefaultPolicyEngine(),
 	}, nil
 }
 
@@ -142,6 +144,11 @@ func (a *Authority) SignCertificateWithProfile(
 		return nil, fmt.Errorf("csr proof-of-possession verification failed: %w", err)
 	}
 
+	policy := a.Policy
+	if policy == nil {
+		policy = NewDefaultPolicyEngine()
+	}
+
 	// 2. Validate Validity bounds
 	if validity <= 0 {
 		validity = profile.DefaultValidity
@@ -164,6 +171,16 @@ func (a *Authority) SignCertificateWithProfile(
 	if profile.RequireSAN {
 		if len(sanDNS) == 0 && len(sanIP) == 0 && len(csr.EmailAddresses) == 0 && len(csr.URIs) == 0 {
 			return nil, ErrSANRequired
+		}
+	}
+
+	// Validate public key and SAN names against PolicyEngine
+	if err := policy.ValidatePublicKey(csr.PublicKey); err != nil {
+		return nil, fmt.Errorf("public key policy validation failed: %w", err)
+	}
+	for _, d := range sanDNS {
+		if err := policy.ValidateDNSName(d); err != nil {
+			return nil, fmt.Errorf("dns name policy validation failed: %w", err)
 		}
 	}
 
@@ -201,6 +218,12 @@ func (a *Authority) SignCertificateWithProfile(
 		CRLDistributionPoints: extConfig.CRLDistributionPoints,
 	}
 
-	// 6. Sign Certificate using the Intermediate Signer (HSM)
+	// 6. Pre-Issuance Linting
+	lintResults := policy.LintCertificate(certTmpl, csr.PublicKey, profile)
+	if HasLintErrors(lintResults) {
+		return nil, &LintErrors{Results: lintResults}
+	}
+
+	// 7. Sign Certificate using the Intermediate Signer (HSM)
 	return x509.CreateCertificate(rand.Reader, certTmpl, a.IntermediateCert, csr.PublicKey, a.Signer)
 }
