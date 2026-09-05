@@ -71,3 +71,8 @@ func (wp *WorkerPool) Start(ctx context.Context) error {
 func (wp *WorkerPool) Submit(req SignRequest) {
 	wp.jobs <- req
 }
+
+// QueueDepth returns the current number of pending signing jobs in the queue.
+func (wp *WorkerPool) QueueDepth() int {
+	return len(wp.jobs)
+}

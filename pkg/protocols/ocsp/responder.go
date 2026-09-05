@@ -231,6 +231,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	thisUpdate := now.Add(-1 * time.Minute)
 	nextUpdate := now.Add(h.validity)
 
+	var respCert *x509.Certificate
+	if h.responderCert != nil && h.responderCert != h.issuerCert {
+		respCert = h.responderCert
+	}
+
 	template := ocsp.Response{
 		Status:           status,
 		SerialNumber:     ocspReq.SerialNumber,
@@ -238,10 +243,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		NextUpdate:       nextUpdate,
 		RevokedAt:        revTime,
 		RevocationReason: reason,
-		Certificate:      h.responderCert,
+		Certificate:      respCert,
 	}
 
-	// Create Response signed by ResponderCert (embedded in response) with h.signer
+	// Create Response signed by ResponderCert (or IssuerCert) with h.signer
 	respDER, err := ocsp.CreateResponse(h.issuerCert, h.responderCert, template, h.signer)
 	if err != nil {
 		http.Error(w, "failed generating ocsp response", http.StatusInternalServerError)
