@@ -93,7 +93,7 @@ make coverage    # Generate code coverage summary
 
 ---
 
-## 🐳 Deploy with Docker & Docker Compose
+## Deploy with Docker & Docker Compose
 
 For deploying to your test cloud server or containerized environments:
 
@@ -119,7 +119,7 @@ Docker Compose automatically provisions a persistent named volume (`certa_data` 
 
 ---
 
-## 💾 Data Persistence & Resuming Services
+## Data Persistence & Resuming Services
 
 When running either locally or in Docker:
 1. **Initial Boot**: `go-certa` generates the Root and Intermediate CA keypairs, self-signs the Root CA, issues the Intermediate CA certificate, and writes them to `<data_dir>/ca/` with strict file permissions (`0600` for keys). It also initializes `<data_dir>/certa.db`.
@@ -275,7 +275,7 @@ Then visit:
 
 ---
 
-## 📚 In-Depth Technical Documentation
+## In-Depth Technical Documentation
 
 Explore the detailed architecture guides in [`docs/`](docs/):
 
