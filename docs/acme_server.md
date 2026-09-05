@@ -56,7 +56,12 @@ To defend against replay and man-in-the-middle attacks:
 - The server generates 128-bit random nonces with a limited time-to-live (e.g., 15 minutes).
 - When a JWS is processed, `ValidateAndConsumeNonce` checks and **immediately deletes** the nonce from memory.
 - If a client replays an old request or tries to reuse a nonce, the server rejects it with `urn:ietf:params:acme:error:badNonce` (HTTP 400).
-- Every valid POST response contains a fresh `Replay-Nonce` header to pipeline the next request smoothly.
+- **RFC 8555 §6.5 Mandate**: Every response to an HTTP POST request **MUST** include a fresh `Replay-Nonce` header to pipeline the next request smoothly.
+
+### 2.3 POST-as-GET Requests (RFC 8555 §6.3)
+To authenticate read-only operations without transmitting state changes:
+- ACME clients query resources (`/acme/order/{id}`, `/acme/authz/{id}`, `/acme/cert/{id}`, `/acme/acct/{id}`) using a JWS with an **empty payload** (`payload: ""`).
+- The server validates the signature and nonce, authenticates the account, and returns the resource representation with a fresh `Replay-Nonce`.
 
 ---
 
@@ -73,7 +78,57 @@ The SHA-256 hash of this canonical JSON string is Base64URL-encoded (without pad
 
 ---
 
-## 4. Production Considerations
+## 4. Header Specifications & Standard Client Compliance
+
+Strict compliance with RFC 8555 headers is required for interoperability with standard ACME clients (Certbot, Lego, Caddy, Traefik):
+
+### 4.1 Challenge Responses (RFC 8555 §7.5.1)
+When responding to challenge triggers (`POST /acme/challenge/{id}`):
+- `Link: <{baseURL}/acme/authz/{authzID}>;rel="up"`: **Mandatory**. Standard ACME clients (e.g., Certbot) parse this relation to discover the parent authorization and track challenge status.
+- `Location: <{challengeURL}>`: Points to the challenge resource.
+- `Content-Type: application/json`: Encodes the updated challenge object.
+
+### 4.2 Order Finalization & State (RFC 8555 §7.4)
+- `Location: <{baseURL}/acme/order/{orderID}>`: Communicates the authoritative order resource URL.
+
+### 4.3 Certificate Retrieval (RFC 8555 §7.4.2)
+- `Content-Type: application/pem-certificate-chain`: Contains the end-entity certificate followed by the issuing intermediate CA certificate.
+- `Link: <{baseURL}/ca/intermediate.crt>;rel="up"`: Points to the issuer's certificate.
+
+### 4.4 Account Error Recovery (RFC 8555 §6.7)
+When a client presents an unknown or deactivated `kid`, the server returns:
+- Problem Type: `urn:ietf:params:acme:error:accountDoesNotExist` (HTTP 400).
+- This standard problem type instructs ACME clients to immediately recover by generating a new account key rather than failing permanently.
+
+---
+
+## 5. End-to-End Automation with Certbot
+
+To test automated issuance using the reference Let's Encrypt Certbot client:
+
+### 5.1 Start `go-certa` ACME Server
+```powershell
+go run ./cmd/certa-server --port 8080 --skip-challenge-validation --allow-internal-domains
+```
+- `--skip-challenge-validation`: Auto-accepts `http-01` challenges for local testing without public DNS/routing.
+- `--allow-internal-domains`: Enables issuing certificates for internal/local hostnames (e.g., `test.local`).
+
+### 5.2 Request Certificate via Certbot Standalone
+```powershell
+certbot certonly --standalone \
+    --server http://localhost:8080/.well-known/acme/directory \
+    -d test.local
+```
+
+### 5.3 Verify Trust Chain
+```powershell
+curl -s http://localhost:8080/ca/chain.pem -o ca-chain.pem
+openssl verify -CAfile ca-chain.pem /etc/letsencrypt/live/test.local/fullchain.pem
+```
+
+---
+
+## 6. Production Considerations
 
 1. **Multi-Perspective Validation (MPV)**:
    - In production public CAs, validating HTTP-01 or DNS-01 challenges from a single vantage point leaves the CA vulnerable to localized BGP route hijacking or DNS poisoning.

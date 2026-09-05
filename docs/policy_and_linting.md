@@ -85,10 +85,11 @@ RFC 6125, RFC 5280, and the CA/Browser Forum Baseline Requirements explicitly di
   - Ed25519 (RFC 8410)
 - **Curve Validation**: `IsOnCurve(X, Y)` is validated to defend against invalid curve attacks where an attacker provides coordinates not residing on the curve.
 
-### 3.3 Algorithm-to-KeyUsage Alignment
+### 3.3 Algorithm-to-KeyUsage Alignment (CA/B Forum BR 2.0+ & RFC 5280 §4.2.1.3)
 A frequent source of X.509 lint failure is asserting KeyUsages that are cryptographically invalid for the public key algorithm:
-- **`KeyEncipherment`**: Only valid for RSA keys (where the client encrypts a pre-master secret using the server's public key).
-- **ECDSA & Ed25519**: Elliptic curve keys cannot encrypt data directly; they only perform digital signatures and key agreement (ECDH). Specifying `KeyEncipherment` on an ECDSA certificate violates RFC 5280 §4.2.1.3 and is flagged as a fatal `LintError` by the `PolicyEngine`.
+- **`KeyEncipherment`**: Only valid for RSA keys when performing direct key exchange. In modern TLS 1.3 (RFC 8446), static RSA key exchange is obsolete, and modern WebPKI server certificates (e.g. Let's Encrypt) assert **only** `DigitalSignature`.
+- **ECDSA & Ed25519**: Elliptic curve keys cannot encrypt data directly; they only perform digital signatures and key agreement (ECDH). Specifying `KeyEncipherment` on an ECDSA certificate violates RFC 5280 §4.2.1.3 and CA/B Forum BR §7.1.2.7.6, and is flagged as a fatal `LintError` by the `PolicyEngine`.
+- **Dynamic Alignment**: In `go-certa`, the CA authority dynamically aligns the requested profile KeyUsage with the subscriber's public key algorithm, automatically masking out `KeyEncipherment` when signing ECDSA / Ed25519 subscriber certificates.
 
 ---
 
@@ -98,3 +99,17 @@ To prevent over-broad domain impersonation:
 1. **Leftmost Position Only**: Wildcard characters (`*`) must appear exclusively as the entire leftmost label (`*.example.com`). Embedded wildcards (e.g., `test*sub.example.com` or `sub.*.example.com`) are rejected with `ErrInvalidWildcard`.
 2. **Public TLD Protection**: Wildcards cannot directly precede a top-level domain (e.g., `*.com`, `*.org`, `*.net`).
 3. **Multiple Wildcard Ban**: Multiple asterisks (e.g., `*.*.example.com`) are forbidden.
+
+---
+
+## 5. Domain Suffix & Internal Domain Policies
+
+### 5.1 Public WebPKI vs Private PKI
+By default, the `PolicyEngine` disallows internal domain names and special-use TLDs (`localhost`, `.local`, `.internal`, `.lan`, `.test`, `.example`, `.invalid`, `.onion`) in accordance with CA/B Forum BR §7.1.4.2.1.
+
+### 5.2 Private Enterprise & Local Development (`AllowInternalDomains`)
+When operating `go-certa` as an internal enterprise CA or local development authority:
+- `policy.AllowInternalDomains = true`: Permits issuing certificates for `.local`, `.internal`, `.lan`, `localhost`, etc. (while `.onion` remains strictly forbidden).
+- CLI Flag: Pass `--allow-internal-domains` to `certa-server`.
+- Environment Variable: Set `CERTA_ALLOW_INTERNAL_DOMAINS=true`.
+- Test Mode: When running with `--skip-challenge-validation`, internal domains are permitted automatically for frictionless local testing.

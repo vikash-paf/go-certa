@@ -84,10 +84,13 @@ Under modern TLS standards (RFC 6125 and CA/B Forum BR §7.1.4.2), the legacy `c
 
 | Profile Name | KeyUsage | ExtKeyUsage | IsCA | Max Validity | Require SAN |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`server-tls`** | DigitalSignature, KeyEncipherment | ServerAuth, ClientAuth | false | 398 Days | Yes |
+| **`server-tls`** | DigitalSignature | ServerAuth, ClientAuth | false | 398 Days | Yes |
 | **`client-auth`** | DigitalSignature | ClientAuth | false | 730 Days | No |
 | **`code-signing`** | DigitalSignature | CodeSigning | false | 1095 Days | No |
 | **`sub-ca`** | CertSign, CRLSign | None | true | 10 Years | No |
+
+> **Note on Key Usage & Algorithms (CA/B Forum BR 2.0+ & RFC 5280 §4.2.1.3)**:
+> In modern TLS (TLS 1.3 and ECDHE), `DigitalSignature` is the universal key usage for server certificates. For ECDSA and Ed25519 keys, `KeyEncipherment` is strictly forbidden by policy. If a custom profile specifies `KeyEncipherment`, `go-certa` dynamically masks it out for ECDSA subscriber keys, ensuring complete compliance.
 
 ---
 
