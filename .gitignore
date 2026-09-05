@@ -40,3 +40,4 @@ bin/
 *.key
 *.crt
 *.crl
+*.pem
