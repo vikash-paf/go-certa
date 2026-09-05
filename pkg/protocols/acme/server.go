@@ -173,6 +173,9 @@ func (s *Server) lookupKey(kid string) (crypto.PublicKey, error) {
 	// kid is the Account URL: {baseURL}/acme/acct/{id}
 	prefix := s.baseURL + "/acme/acct/"
 	accountID := strings.TrimPrefix(kid, prefix)
+	if idx := strings.LastIndex(accountID, "/"); idx != -1 {
+		accountID = accountID[idx+1:]
+	}
 
 	acct, exists := s.accounts[accountID]
 	if !exists {
@@ -194,8 +197,12 @@ func (s *Server) verifyJWS(w http.ResponseWriter, r *http.Request) (*ParsedJWS, 
 
 	parsed, err := DecodeAndVerifyJWS(body, s.lookupKey)
 	if err != nil {
+		probType := ProblemMalformed
+		if strings.Contains(err.Error(), "account") && strings.Contains(err.Error(), "not found") {
+			probType = ProblemAccountDoesNotExist
+		}
 		s.writeProblem(w, ProblemDetails{
-			Type:   ProblemMalformed,
+			Type:   probType,
 			Detail: err.Error(),
 			Status: http.StatusBadRequest,
 		})
